@@ -47,6 +47,7 @@
 #include "ns3/pointer.h"
 #include "ns3/custom-header.h"
 #include <iostream>
+#include <climits>
 NS_LOG_COMPONENT_DEFINE("QbbNetDevice");
 
 namespace ns3 {
@@ -97,24 +98,20 @@ namespace ns3 {
 		if (!paused[ack_q_idx] && m_ackQ->GetNPackets() > 0)
 			return -1;
 
-		// no pkt in highest priority queue, do rr for each qp
+		// no pkt in highest priority queue, assign next packet based on priority (RR if same priority)
 		int res = -1024;
 		uint32_t fcount = m_qpGrp->GetN();
 		uint32_t min_finish_id = 0xffffffff;
+		int best_pg = INT_MAX;
 		for (qIndex = 1; qIndex <= fcount; qIndex++){
 			uint32_t idx = (qIndex + m_rrlast) % fcount;
 			Ptr<RdmaQueuePair> qp = m_qpGrp->Get(idx);
-			if(qp->GetBytesLeft()<=0){
-				int sender_node = qp->GetSrc();
-				int receiver_node = qp->GetDest();
-				int tag = qp->GetTag();
-				int t_count = qp->GetInitialSize();
-			}
 			if (!paused[qp->m_pg] && qp->GetBytesLeft() > 0 && !qp->IsWinBound()){
-				if (m_qpGrp->Get(idx)->m_nextAvail.GetTimeStep() > Simulator::Now().GetTimeStep()) //not available now
+				if (qp->m_nextAvail.GetTimeStep() > Simulator::Now().GetTimeStep())
 					continue;
-				res = idx;
-				break;
+				if ((int)qp->m_pg < best_pg){ 
+					best_pg = qp->m_pg; res = idx; 
+				}  
 			}else if (qp->IsFinished()){
 				min_finish_id = idx < min_finish_id ? idx : min_finish_id;
 			}
@@ -303,8 +300,8 @@ namespace ns3 {
 				}
 			}
 			return;
-		}else{   //switch, doesn't care about qcn, just send
-			p = m_queue->DequeueRR(m_paused);		//this is round-robin
+		}else{   //switch, doesn't care about qcn, just send but based on priority
+			p = m_queue->DequeuePRIO(m_paused);		//this is priority-based, change to DequeueRR if you want round-robin
 			if (p){
 				m_snifferTrace(p);
 				m_promiscSnifferTrace(p);
