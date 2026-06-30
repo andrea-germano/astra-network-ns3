@@ -73,6 +73,7 @@ int nic_total_pause_time =
     0; // slightly less than finish time without inefficiency in us
 
 uint32_t ack_high_prio = 0;
+uint32_t strict_priority = 0; // 0: RR, 1: strict priority
 uint64_t link_down_time = 0;
 uint32_t link_down_A = 0, link_down_B = 0;
 
@@ -457,6 +458,8 @@ bool ReadConf(string network_configuration) {
       rate_bound = v;
     } else if (key.compare("ACK_HIGH_PRIO") == 0) {
       conf >> ack_high_prio;
+    } else if (key.compare("STRICT_PRIORITY") == 0) { 
+      conf >> strict_priority;
     } else if (key.compare("DCTCP_RATE_AI") == 0) {
       conf >> dctcp_rate_ai;
     } else if (key.compare("NIC_TOTAL_PAUSE_TIME") == 0) {
@@ -803,6 +806,7 @@ bool SetupNetwork(void (*qp_finish)(FILE *, Ptr<RdmaQueuePair>)) {
     RdmaEgressQueue::ack_q_idx = 0;
   else
     RdmaEgressQueue::ack_q_idx = 3;
+  BEgressQueue::strict_priority = strict_priority;
 
   // setup routing
   CalculateRoutes(n);

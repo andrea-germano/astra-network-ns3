@@ -109,9 +109,14 @@ namespace ns3 {
 			if (!paused[qp->m_pg] && qp->GetBytesLeft() > 0 && !qp->IsWinBound()){
 				if (qp->m_nextAvail.GetTimeStep() > Simulator::Now().GetTimeStep())
 					continue;
-				if ((int)qp->m_pg < best_pg){ 
-					best_pg = qp->m_pg; res = idx; 
-				}  
+				if (BEgressQueue::strict_priority) {
+					if ((int)qp->m_pg < best_pg) { // find the best priority queue
+						 best_pg = qp->m_pg; 
+						 res = idx; 
+					}
+				} else {
+					res = idx; break; //Original RR
+				}
 			}else if (qp->IsFinished()){
 				min_finish_id = idx < min_finish_id ? idx : min_finish_id;
 			}
@@ -301,7 +306,7 @@ namespace ns3 {
 			}
 			return;
 		}else{   //switch, doesn't care about qcn, just send but based on priority
-			p = m_queue->DequeuePRIO(m_paused);		//this is priority-based, change to DequeueRR if you want round-robin
+			p = BEgressQueue::strict_priority ? m_queue->DequeuePRIO(m_paused) : m_queue->DequeueRR(m_paused); // dequeue based on priority or round robin
 			if (p){
 				m_snifferTrace(p);
 				m_promiscSnifferTrace(p);

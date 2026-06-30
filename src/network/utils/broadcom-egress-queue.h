@@ -36,6 +36,7 @@ namespace ns3 {
 		static TypeId GetTypeId(void);
 		static const unsigned fCnt = 128; //max number of queues, 128 for NICs
 		static const unsigned qCnt = 8; //max number of queues, 8 for switches
+		static bool strict_priority;
 		BEgressQueue();
 		virtual ~BEgressQueue();
 		bool Enqueue(Ptr<Packet> p, uint32_t qIndex);

@@ -28,6 +28,7 @@
 
 
 namespace ns3 {
+	bool BEgressQueue::strict_priority = false;
 
 	NS_LOG_COMPONENT_DEFINE("BEgressQueue");
 	NS_OBJECT_ENSURE_REGISTERED(BEgressQueue);
