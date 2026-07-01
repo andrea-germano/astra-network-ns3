@@ -807,6 +807,9 @@ bool SetupNetwork(void (*qp_finish)(FILE *, Ptr<RdmaQueuePair>)) {
   else
     RdmaEgressQueue::ack_q_idx = 3;
   BEgressQueue::strict_priority = strict_priority;
+  if (strict_priority && !ack_high_prio){
+    std::cerr << "[WARN] STRICT_PRIORITY=1 with ACK_HIGH_PRIO=0: ACK packets can be starved by high-priority data\n";
+  }
 
   // setup routing
   CalculateRoutes(n);
