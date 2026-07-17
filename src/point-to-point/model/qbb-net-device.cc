@@ -70,6 +70,8 @@ namespace ns3 {
 
 	RdmaEgressQueue::RdmaEgressQueue(){
 		m_rrlast = 0;
+		for(uint32_t i = 0; i < qCnt; i++)
+			m_rrlast_pg[i] = 0;
 		m_qlast = 0;
 		m_ackQ = CreateObject<DropTailQueuePacket>();
 		//m_ackQ = CreateObject<RedQueue>();
@@ -86,6 +88,10 @@ namespace ns3 {
 		if (qIndex >= 0){ // qp
 			Ptr<Packet> p = m_rdmaGetNxtPkt(m_qpGrp->Get(qIndex));
 			m_rrlast = qIndex;
+			if (BEgressQueue::strict_priority) {
+				NS_ASSERT_MSG(m_qpGrp->Get(qIndex)->m_pg < qCnt, "pg out of range");
+				m_rrlast_pg[m_qpGrp->Get(qIndex)->m_pg] = qIndex;
+			}
 			m_qlast = qIndex;
 			m_traceRdmaDequeue(p, m_qpGrp->Get(qIndex)->m_pg);
 			return p;
@@ -93,30 +99,27 @@ namespace ns3 {
 		return 0;
 	}
 	int RdmaEgressQueue::GetNextQindex(bool paused[]){
-		bool found = false;
-		uint32_t qIndex;
 		if (!paused[ack_q_idx] && m_ackQ->GetNPackets() > 0)
 			return -1;
+		return BEgressQueue::strict_priority ? GetNextQindexPrio(paused)
+		                                     : GetNextQindexRR(paused);
+	}
 
-		// no pkt in highest priority queue, assign next packet based on priority (RR if same priority)
+	int RdmaEgressQueue::GetNextQindexRR(bool paused[]){ //Original version of GetNextQindex
+		bool found = false;
+		uint32_t qIndex;
+		// no pkt in highest priority queue, do rr for each qp
 		int res = -1024;
 		uint32_t fcount = m_qpGrp->GetN();
 		uint32_t min_finish_id = 0xffffffff;
-		int best_pg = INT_MAX;
 		for (qIndex = 1; qIndex <= fcount; qIndex++){
 			uint32_t idx = (qIndex + m_rrlast) % fcount;
 			Ptr<RdmaQueuePair> qp = m_qpGrp->Get(idx);
 			if (!paused[qp->m_pg] && qp->GetBytesLeft() > 0 && !qp->IsWinBound()){
-				if (qp->m_nextAvail.GetTimeStep() > Simulator::Now().GetTimeStep())
+				if (m_qpGrp->Get(idx)->m_nextAvail.GetTimeStep() > Simulator::Now().GetTimeStep()) //not available now
 					continue;
-				if (BEgressQueue::strict_priority) {
-					if ((int)qp->m_pg < best_pg) { // find the best priority queue
-						 best_pg = qp->m_pg; 
-						 res = idx; 
-					}
-				} else {
-					res = idx; break; //Original RR
-				}
+				res = idx;
+				break;
 			}else if (qp->IsFinished()){
 				min_finish_id = idx < min_finish_id ? idx : min_finish_id;
 			}
@@ -135,6 +138,69 @@ namespace ns3 {
 			qps.resize(nxt);
 		}
 		return res;
+	}
+
+	int RdmaEgressQueue::GetNextQindexPrio(bool paused[]){
+		uint32_t fcount = m_qpGrp->GetN();
+		if (fcount == 0)
+			return -1024;
+
+		// pass 1: which is the best priority class among eligible qps
+		int best_pg = INT_MAX;
+		for (uint32_t i = 0; i < fcount; i++){
+			Ptr<RdmaQueuePair> qp = m_qpGrp->Get(i);
+			if (Eligible(qp, paused) && (int)qp->m_pg < best_pg)
+				best_pg = qp->m_pg;
+		}
+
+		// pass 2: round robin within that class, using that class' own cursor
+		int res = -1024;
+		if (best_pg != INT_MAX){
+			for (uint32_t k = 1; k <= fcount; k++){
+				uint32_t idx = (k + m_rrlast_pg[best_pg]) % fcount;
+				Ptr<RdmaQueuePair> qp = m_qpGrp->Get(idx);
+				if (Eligible(qp, paused) && (int)qp->m_pg == best_pg){
+					res = idx;
+					break;
+				}
+			}
+		}
+
+		// clear the finished qp; re-anchor every cursor by identity, not by index
+		uint32_t min_finish_id = 0xffffffff;
+		for (uint32_t i = 0; i < fcount; i++)
+			if (m_qpGrp->Get(i)->IsFinished()){ min_finish_id = i; break; }
+
+		if (min_finish_id < 0xffffffff){
+			Ptr<RdmaQueuePair> anchor[qCnt];
+			for (uint32_t g = 0; g < qCnt; g++)
+				if (m_rrlast_pg[g] < fcount)
+					anchor[g] = m_qpGrp->Get(m_rrlast_pg[g]);
+
+			int nxt = min_finish_id;
+			auto &qps = m_qpGrp->m_qps;
+			for (int i = min_finish_id + 1; i < (int)fcount; i++) if (!qps[i]->IsFinished()){
+				if (i == res)
+					res = nxt;
+				qps[nxt] = qps[i];
+				nxt++;
+			}
+			qps.resize(nxt);
+
+			for (uint32_t g = 0; g < qCnt; g++){
+				uint32_t pos = 0;
+				if (anchor[g] && !anchor[g]->IsFinished())
+					for (uint32_t i = 0; i < qps.size(); i++)
+						if (qps[i] == anchor[g]){ pos = i; break; }
+				m_rrlast_pg[g] = pos;
+			}
+		}
+		return res;
+	}
+
+	bool RdmaEgressQueue::Eligible(Ptr<RdmaQueuePair> qp, bool paused[]){
+		return !paused[qp->m_pg] && qp->GetBytesLeft() > 0 && !qp->IsWinBound()
+		    && qp->m_nextAvail.GetTimeStep() <= Simulator::Now().GetTimeStep();
 	}
 
 	int RdmaEgressQueue::GetLastQueue(){
