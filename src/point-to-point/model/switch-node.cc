@@ -12,6 +12,7 @@
 #include "ns3/simulator.h"
 #include "ns3/int-header.h"
 #include <cmath>
+#include <set>
 
 namespace ns3 {
 
@@ -224,8 +225,23 @@ void SwitchNode::SwitchNotifyDequeue(uint32_t ifIndex, uint32_t qIndex, Ptr<Pack
 			IntHeader *ih = (IntHeader*)&buf[PppHeader::GetStaticSize() + 20 + 8 + 6]; // ppp, ip, udp, SeqTs, INT
 			Ptr<QbbNetDevice> dev = DynamicCast<QbbNetDevice>(m_devices[ifIndex]);
 			if (m_ccMode == 3){ // HPCC
-				ih->PushHop(Simulator::Now().GetTimeStep(), m_txBytes[ifIndex], dev->GetQueue()->GetNBytesTotal(), dev->GetDataRate().GetBitRate());
+				// Scale-up links (NVLink/NVSwitch 4800G) run their own link-level flow control and are not part of the RoCE fabric HPCC manages
+				uint64_t rate = dev->GetDataRate().GetBitRate();
+				if (IntHop::RateEncodable(rate)){
+					ih->PushHop(Simulator::Now().GetTimeStep(), m_txBytes[ifIndex], dev->GetQueue()->GetNBytesTotal(), rate);
+				}else{
+					static std::set<uint64_t> notified;
+					if (notified.insert(rate).second)
+						printf("INT: rate %lu not encodable, hop exempt from HPCC (scale-up link)\n", rate);
+				}
 			}else if (m_ccMode == 10){ // HPCC-PINT
+				// Same scale-up exemption as HPCC above
+				uint64_t rate = dev->GetDataRate().GetBitRate();
+				if (!IntHop::RateEncodable(rate)){
+					static std::set<uint64_t> notified;
+					if (notified.insert(rate).second)
+						printf("INT: rate %lu not encodable, hop exempt from HPCC-PINT (scale-up link)\n", rate);
+				}else{
 				uint64_t t = Simulator::Now().GetTimeStep();
 				uint64_t dt = t - m_lastPktTs[ifIndex];
 				if (dt > m_maxRtt)
@@ -299,6 +315,7 @@ void SwitchNode::SwitchNotifyDequeue(uint32_t ifIndex, uint32_t qIndex, Ptr<Pack
 					ih->SetPower(power);
 
 				m_u[ifIndex] = newU;
+				}
 			}
 		}
 	}

@@ -39,6 +39,13 @@ public:
 	uint64_t GetTime(){
 		return time;
 	}
+	// A rate absent from lineRateValues cannot ride in the 3-bit lineRate field
+	static bool RateEncodable(uint64_t _rate){
+		for (uint32_t i = 0; i < 8; i++)
+			if (lineRateValues[i] != 0 && lineRateValues[i] == _rate)
+				return true;
+		return false;
+	}
 	void Set(uint64_t _time, uint64_t _bytes, uint32_t _qlen, uint64_t _rate){
 		time = _time;
 		bytes = _bytes / (byteUnit * multi);
