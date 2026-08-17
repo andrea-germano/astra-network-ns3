@@ -157,6 +157,13 @@ struct QlenDistribution {
 };
 map<uint32_t, map<uint32_t, uint32_t>> queue_result;
 void monitor_buffer(FILE *qlen_output, NodeContainer *n) {
+  // QLEN_MON_END was parsed but never enforced
+  if ((uint64_t)Simulator::Now().GetNanoSeconds() > qlen_mon_end) {
+    if (qlen_output != NULL) {
+      fclose(qlen_output);
+    }
+    return;
+  }
   for (uint32_t i = 0; i < n->GetN(); i++) {
     if (n->Get(i)->GetNodeType() == 1) { // is switch
       Ptr<SwitchNode> sw = DynamicCast<SwitchNode>(n->Get(i));
@@ -505,6 +512,10 @@ bool ReadConf(string network_configuration) {
       conf >> qlen_mon_start;
     } else if (key.compare("QLEN_MON_END") == 0) {
       conf >> qlen_mon_end;
+    } else if (key.compare("QLEN_MON_INTERVAL") == 0) {
+      // Sampling period of the buffer monitor, in ns. The 100ns default samples
+      // 10M times per simulated second and per switch
+      conf >> qlen_mon_interval;
     } else if (key.compare("MULTI_RATE") == 0) {
       int v;
       conf >> v;
